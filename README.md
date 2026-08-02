@@ -2,6 +2,9 @@
 
 ## DeepBlock 比赛前端
 
+完整的项目背景、技术方案、实验设置、真机结果、Web 操作和结论边界见
+[`docs/Quantum_Route_Forge_项目完整文档.md`](docs/Quantum_Route_Forge_项目完整文档.md)。
+
 新的比赛入口保留路线地图与参数控制，并把 Baihua DeepBlock 算法隔离在
 `src/quantum_route_forge/deepblock/` 中。页面包含路线优化、B1/B2/B3 过程、
 Hardware/Random/Simulator/Exact 公平对照以及可重载的本地运行历史。
@@ -237,93 +240,185 @@ All groups use the same total budget, evaluator, capacity repair, nearest-neighb
 Prepare input directly from a complete validated result store:
 
 ```powershell
-.\.venv\Scripts\python.exe experiments\prepare_hybrid_input.py `
-  --config experiments\configs\formal_hardware_matrix_v2.json `
-  --experiment-dir results\experiments\qrf_formal_hardware_matrix_v2 `
-  --output results\experiments\qrf_formal_hardware_matrix_v2\hybrid_input.json
+.\.venv\Scs���{h��춻�q�^traw["shots_received"] = sum(
+        sum(trace.run.counts.values()) for trace in result.traces
+    )
+    return raw
 
-.\.venv\Scripts\python.exe experiments\hybrid_contribution.py `
-  --input results\experiments\qrf_formal_hardware_matrix_v2\hybrid_input.json `
-  --outdir results\experiments\qrf_formal_hardware_matrix_v2\hybrid
-```
 
-The measured bitstrings are decoded with the frozen
-`selected_customer_ids_in_qubit_order`; backend, repeat, final source, and paired deltas are
-retained at the hardware-task level. The workflow writes both JSON detail and
-`hybrid_summary.csv`, including backend- and instance-stratified bootstrap summaries.
+def run_deepblock_optimization(
+    *,
+    instance: DispatchInstance,
+    mode: str = "deepblock_simulator",
+    backend: str = "Baihua",
+    shots: int = 4096,
+    candidate_k: int = 64,
+    qaoa_depth: int = 1,
+    pool_size: int = 16,
+    block_size: int = 8,
+    overlap: int = 3,
+    seed: int = 2026,
+    api_token: str = "",
+    submit_hardware: bool = False,
+    confirm_hardware_submit: bool = False,
+    history_root: str | Path | None = None,
+    save_history: bool = True,
+) -> dict[str, Any]:
+    """Run one fair DeepBlock comparison and return the UI's stable schema."""
+    requested_mode = str(mode or "").strip().lower()
+    if requested_mode not in MODE_ORDER:
+        raise ValueError(f"unsupported mode: {mode}")
+    if not instance.feasible_capacity:
+        raise ValueError(
+            "Total demand exceeds fleet capacity; increase capacity before running."
+        )
 
-## Result store
+    initial_result = capacity_constrained_kmeans(instance, seed=int(seed))
+    initial_assignments = {
+        vehicle: list(customers)
+        for vehicle, customers in initial_result.assignments.items()
+    }
+    initial_routes = _routes_payload(initial_assignments, instance)
+    initial_distance = float(sum(route["distance"] for route in initial_routes))
+    config_base = dict(
+        pool_size=int(pool_size),
+        block_size=int(block_size),
+        overlap=int(overlap),
+        qaoa_depth=int(qaoa_depth),
+        shots=int(shots),
+        candidate_k=int(candidate_k),
+        scan_order="forward",
+        backend=str(backend or "Baihua"),
+    )
 
-Each batch experiment is stored under:
+    results: dict[str, DeepBlockResult] = {}
+    chip_info: dict[str, Any] | None = None
+    if submit_hardware:
+        try:
+            from quark.circuit import Backend
+        except ImportError as exc:
+            raise RuntimeError(
+                "quarkcircuit==0.5.13 is required for Baihua calibration and compilation."
+            ) from exc
+        chip_info = dict(Backend(str(backend or "Baihua")).chip_info)
+    # All arms receive the same immutable starting assignment and parameters.
+    for arm_mode in MODE_ORDER:
+        is_hardware = arm_mode == "deepblock_hardware"
+        should_submit = bool(submit_hardware and requested_mode == arm_mode)
+        config = DeepBlockConfig(
+            **config_base,
+            submit_hardware=should_submit,
+            confirm_hardware_submit=bool(confirm_hardware_submit and should_submit),
+        )
+        results[arm_mode] = run_deepblock(
+            instance=instance,
+            initial_assignments=initial_assignments,
+            mode=arm_mode,
+            config=config,
+            seed=int(seed),
+            api_token=str(api_token or "").strip(),
+            chip_info=chip_info if is_hardware else None,
+        )
 
-```text
-results/experiments/<experiment_id>/
-  config.json
-  manifest.json
-  frozen_thresholds.json
-  tasks.jsonl
-  candidates.jsonl
-  instance_summary.csv
-  aggregate_summary.json
-  protocol_snapshot.json
-  baseline_manifest.json
-  task_manifest.csv
-  tasks/<task_id>/
-    evidence.json
-    raw_response.json
-    counts.json
-    logical_qasm.qasm
-    candidate_metrics.csv
-    summary.json
-  raw_evidence/
-  figures/
-  logs/
-```
+    selected = _result_payload(results[requested_mode], instance)
+    comparisons: list[dict[str, Any]] = [
+        {
+            "method": "Initial",
+            "mode": "classical_initial",
+            "source": "classical",
+            "status": "COMPLETED",
+            "final_distance": initial_distance,
+            "improvement": 0.0,
+            "improvement_pct": 0.0,
+            "accepted_moves": 0,
+            "task_ids": [],
+        }
+    ]
+    labels = {
+        "deepblock_hardware": "Hardware",
+        "deepblock_random": "Random",
+        "deepblock_simulator": "Simulator",
+        "deepblock_exact": "Exact",
+    }
+    for arm_mode in MODE_ORDER:
+        item = _result_payload(results[arm_mode], instance)
+        comparisons.append(
+            {
+                "method": labels[arm_mode],
+                "mode": arm_mode,
+                "source": item["source"],
+                "status": item["status"],
+                "final_distance": item["final_distance"],
+                "improvement": item["improvement"],
+                "improvement_pct": item["improvement_pct"],
+                "accepted_moves": item["accepted_moves"],
+                "task_ids": item["task_ids"],
+                "backend": item["backend"],
+                "shots_received": item["shots_received"],
+            }
+        )
 
-`config.json`, frozen thresholds, and evidence hashes are immutable for a given experiment/config hash. Authentication material is recursively redacted before evidence is written.
-Completed formal evidence also records the dependency snapshot, timestamps, queue/poll fields,
-compile options, optional hardware metadata, requested/actual backend, QASM/customer order, and
-all frozen hashes. Validate the complete matrix before analysis:
-
-```powershell
-.\.venv\Scripts\python.exe experiments\validate_formal_result_store.py `
-  --config experiments\configs\formal_hardware_matrix_v2.json `
-  --experiment-dir results\experiments\qrf_formal_hardware_matrix_v2
-```
-
-## Paper artifacts
-
-After an experiment:
-
-```powershell
-.\.venv\Scripts\python.exe experiments\generate_paper_artifacts.py `
-  --experiment-dir results\experiments\qrf_formal_hardware_matrix_v2
-```
-
-The result root receives task-, instance-, and backend-level CSV/JSON summaries. The `figures/`
-directory receives a CSV/LaTeX result table, backend-separated shot-weighted energy CDF,
-task-paired measured-versus-random chart, classical-reach versus strict-improvement chart,
-C+Q versus C+R delta chart, empirical resampling chart, and data-derived conclusion text.
-Neutral or `NOT_EVALUABLE` wording is generated when evidence is incomplete.
-
-It also writes task-level candidate-quality and cross-backend CSVs, `statistics_summary.json`, separate classical-reach/strict-improvement bars, a backend distribution plot, and the `C+Q` versus `C+R` route-delta plot. Statistical inference uses the hardware task as the repeat unit; shots are never treated as independent experiments.
-
-## Testing and CI
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest -q
-```
-
-The offline suite covers dual thresholds, equality/strict comparisons, zero normalization denominators, nested/probability counts, shot mismatches, bit order, evidence-source isolation, exact evaluation, result-store idempotence, batch resume, fair candidate budgets, app tabs, capacity behavior, and checked-in evidence replay.
-
-Fresh P10 smoke evidence is checked in for Baihua task `2608012251527123036`, Dongling task `2608012253199368389`, and Shenglian task `2608012254449770289`; each has 1024/1024 counts and matching requested/actual backend, QASM, thresholds, customer order, and code commit. These three tasks validate the pipeline only. The separate formal matrix contains 24 completed hardware tasks; no replay/manual/fallback data was substituted. Across the formal matrix, mean measured quality hit rate was 0.161011 versus 0.226562 for the frozen random reference, strict feasible-classical improvement was zero in all tasks, and C+Q did not change route distance relative to C+R.
-
-## Network troubleshooting
-
-If Quafu diagnostics show `ConnectionResetError(10054)` or a reserved/test `198.18.x.x` address, local proxy/TUN DNS interception is likely. Change the proxy rule/node for `quafu.baqis.ac.cn` and `quafu-sqc.baqis.ac.cn`, or pass an explicit proxy:
-
-```powershell
-$env:QUAFU_PROXY_URL="http://127.0.0.1:7897"
-```
-
-Endpoint and DNS diagnostics appear in Single Run without being included in formal candidate claims.
+    run_id = (
+        datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        + "-"
+        + uuid4().hex[:8]
+    )
+    arms_payload = {
+        arm_mode: _result_payload(result, instance)
+        for arm_mode, result in results.items()
+    }
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "run_id": run_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "parameters": {
+            "seed": int(seed),
+            "num_customers": len(instance.customers),
+            "num_vehicles": instance.num_vehicles,
+            "vehicle_capacity": instance.vehicle_capacity,
+            "mode": requested_mode,
+            "backend": str(backend or "Baihua"),
+            "shots": int(shots),
+            "candidate_k": int(candidate_k),
+            "qaoa_depth": int(qaoa_depth),
+            "pool_size": int(pool_size),
+            "block_size": int(block_size),
+            "overlap": int(overlap),
+        },
+        "fairness": {
+            "same_instance": True,
+            "same_initial_assignment": True,
+            "same_blocks": True,
+            "same_shots": True,
+            "same_candidate_k": True,
+            "same_capacity_repair": True,
+            "same_route_evaluator": True,
+            "same_acceptance_rule": "strict_true_distance_improvement",
+        },
+        "instance": _instance_payload(instance),
+        "initial": {
+            "distance": initial_distance,
+            "assignments": {
+                str(vehicle): [customer.customer_id for customer in customers]
+                for vehicle, customers in sorted(initial_assignments.items())
+            },
+            "routes": initial_routes,
+        },
+        "selected": selected,
+        "arms": arms_payload,
+        "quantum_effect": low_energy_effect_from_payload(
+            arms_payload["deepblock_hardware"]
+        ),
+        "comparisons": comparisons,
+        "warnings": (
+            [
+                "Hardware is a guarded dry-run and is NOT_EVALUABLE until explicit submission is confirmed."
+            ]
+            if not submit_hardware
+            else []
+        ),
+    }
+    if save_history:
+        root = Path(history_root) if history_root else Path("results") / "competition_history"
+        CompetitionHistory(root).save(payload)
+    return payload
