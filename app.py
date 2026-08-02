@@ -366,437 +366,263 @@ app.layout = html.Div(
             children=[
                 dcc.Tab(label="01  路线优化", value="route", children=[route_page]),
                 dcc.Tab(label="02  DeepBlock 过程", value="process", children=[process_page]),
-                dcc.Tab(label="03  方法对比", value="comparison", children=[comparison_page]),
-                dcc.Tab(label="04  运行历史", value="history", children=[history_page]),
-            ],
-        ),
-        html.Div(
-            "Quantum Route Forge · competition/deepblock-ui-integration · Hardware failures never become Exact results",
-            style={"textAlign": "center", "color": "#8291a7", "fontSize": "12px", "padding": "28px 0 10px"},
-        ),
-    ],
-    style={"maxWidth": "1500px", "margin": "0 auto", "padding": "24px", "color": INK},
-)
-
-
-@app.callback(
-    Output("run-store", "data"),
-    Output("run-status", "children"),
-    Input("run-btn", "n_clicks"),
-    Input("open-history-btn", "n_clicks"),
-    State("history-run-id", "value"),
-    State("num-customers", "value"),
-    State("num-vehicles", "value"),
-    State("vehicle-capacity", "value"),
-    State("seed", "value"),
-    State("mode", "value"),
-    State("backend", "value"),
-    State("shots", "value"),
-    State("candidate-k", "value"),
-    State("qaoa-depth", "value"),
-    State("hardware-confirm", "value"),
-    prevent_initial_call=True,
-)
-def execute_or_open(
-    _run_clicks,
-    _open_clicks,
-    history_run_id,
-    num_customers,
-    num_vehicles,
-    vehicle_capacity,
-    seed,
-    mode,
-    backend,
-    shots,
-    candidate_k,
-    qaoa_depth,
-    hardware_confirm,
-):
-    if ctx.triggered_id == "open-history-btn":
-        if not history_run_id:
-            return no_update, "请选择一个历史 run ID。"
-        try:
-            payload = HISTORY.load(history_run_id)
-            return payload, f"已重新打开历史结果 {history_run_id}。"
-        except Exception as exc:
-            return no_update, f"历史结果读取失败：{type(exc).__name__}: {exc}"
-    try:
-        instance = generate_dispatch_instance(
-            seed=int(seed),
-            num_customers=int(num_customers),
-            num_vehicles=int(num_vehicles),
-            vehicle_capacity=int(vehicle_capacity),
-        )
-        confirmed = "confirm" in (hardware_confirm or [])
-        payload = run_deepblock_optimization(
-            instance=instance,
-            mode=mode,
-            backend=backend,
-            shots=int(shots),
-            candidate_k=int(candidate_k),
-            qaoa_depth=int(qaoa_depth),
-            pool_size=16,
-            block_size=8,
-            overlap=3,
-            seed=int(seed),
-            submit_hardware=(mode == "deepblock_hardware" and confirmed),
-            confirm_hardware_submit=(mode == "deepblock_hardware" and confirmed),
-            history_root=HISTORY.root,
-        )
-        selected = payload["selected"]
-        return (
-            payload,
-            f"{payload['run_id']} · {selected['status']} · source={selected['source']} · "
-            f"{selected['baseline_distance']:.3f} → {selected['final_distance']:.3f} · "
-            f"accepted={selected['accepted_moves']}",
-        )
-    except Exception as exc:
-        return no_update, f"运行失败：{type(exc).__name__}: {exc}"
-
-
-@app.callback(
-    Output("metric-row", "children"),
-    Output("initial-route", "figure"),
-    Output("final-route", "figure"),
-    Output("route-table", "data"),
-    Output("route-table", "columns"),
-    Output("block-table", "data"),
-    Output("block-table", "columns"),
-    Output("candidate-table", "data"),
-    Output("candidate-table", "columns"),
-    Output("process-badges", "children"),
-    Output("evidence-json", "children"),
-    Output("comparison-bars", "figure"),
-    Output("scan-lines", "figure"),
-    Output("comparison-table", "data"),
-    Output("comparison-table", "columns"),
-    Output("fairness-strip", "children"),
-    Output("history-detail", "children"),
-    Input("run-store", "data"),
-)
-def render_run(payload):
-    if not payload:
-        metrics = [
-            _metric("Initial", "—"),
-            _metric("Final", "—"),
-            _metric("Improvement", "—"),
-            _metric("Accepted", "—"),
-            _metric("Source", "—", "#6b50d9"),
-        ]
-        empty = _empty_figure("等待 DeepBlock 运行")
-        return (
-            metrics,
-            empty,
-            empty,
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-            "{}",
-            empty,
-            empty,
-            [],
-            [],
-            "公平性参数将在运行后锁定。",
-            "选择历史记录可查看完整详情。",
-        )
-
-    instance = payload["instance"]
-    initial = payload["initial"]
-    selected = payload["selected"]
-    improvement = float(selected.get("improvement", 0.0))
-    metrics = [
-        _metric("Initial distance", f"{initial['distance']:.3f}", "#183153"),
-        _metric("Final distance", f"{selected['final_distance']:.3f}", "#2f80ed"),
-        _metric("Improvement", f"{improvement:.3f} · {selected['improvement_pct']:.2f}%", "#168f62" if improvement > 0 else "#b87513"),
-        _metric("Accepted moves", str(selected.get("accepted_moves", 0)), "#b87513"),
-        _metric("Source / status", f"{selected.get('source')} · {selected.get('status')}", "#6b50d9"),
-    ]
-    initial_figure = _route_figure(instance, initial.get("routes", []), "容量约束初始路线")
-    final_figure = _route_figure(instance, selected.get("routes", []), "DeepBlock 最终路线")
-
-    route_rows = [
-        {
-            "vehicle": route["vehicle_id"],
-            "customers": " → ".join(f"C{value}" for value in route["customer_ids"]) or "—",
-            "load": route["load"],
-            "capacity": instance["vehicle_capacity"],
-            "distance": round(route["distance"], 6),
+                dcc.Tab(label="03  方法对比", value="comparison", children=[compm��nm�G����ƭy�          "blocks": [],
         }
-        for route in selected.get("routes", [])
-    ]
-    route_columns = [{"name": name, "id": key} for name, key in [
-        ("车辆", "vehicle"), ("客户顺序", "customers"), ("载荷", "load"), ("容量", "capacity"), ("距离", "distance")
-    ]]
+    hardware_mean = sum(row["hardware_mass"] for row in rows) / len(rows)
+    uniform_mean = sum(row["uniform_mass"] for row in rows) / len(rows)
+    return {
+        "evaluable": True,
+        "definition": "exact bottom 10% proxy-QUBO energy rank",
+        "blocks": rows,
+        "mean_hardware_mass": hardware_mean,
+        "mean_uniform_mass": uniform_mean,
+        "enrichment": hardware_mean / uniform_mean,
+        "difference_percentage_points": 100.0 * (hardware_mean - uniform_mean),
+        "positive_blocks": sum(bool(row["positive"]) for row in rows),
+        "total_blocks": len(rows),
+        "interpretation": (
+            "positive_low_energy_enrichment"
+            if hardware_mean > uniform_mean
+            else "no_positive_low_energy_enrichment"
+        ),
+    }
 
-    block_rows = []
-    candidate_rows = []
-    evidence = []
-    for trace in selected.get("traces", []):
-        block = trace["block"]
-        run = trace["run"]
-        batch = trace.get("candidates") or {}
-        block_rows.append(
-            {
-                "sequence": trace["sequence"],
-                "block": block["block_id"],
-                "vehicle_pair": str(block["vehicle_pair"]),
-                "customers": str(block["customer_ids"]),
-                "width": block["width"],
-                "depth": run["parameters"]["depth"],
-                "task_id": run.get("task_id") or "—",
-                "backend": run.get("backend") or "—",
-                "shots": sum(run.get("counts", {}).values()),
-                "accepted": trace["accepted"],
-                "distance": round(trace["distance_after"], 6),
-                "decision": trace["decision"],
-                "status": trace["status"],
-            }
-        )
-        for rank, row in enumerate(batch.get("top_frequency", []), start=1):
-            candidate_rows.append(
+
+def _routes_payload(
+    assignments: dict[int, list[Customer]],
+    instance: DispatchInstance,
+) -> list[dict[str, Any]]:
+    plans = build_route_plans(assignments=assignments, depot=instance.depot, two_opt_rounds=2)
+    return [
+        {
+            "vehicle_id": route.vehicle_id,
+            "customer_ids": [customer.customer_id for customer in route.customers],
+            "customers": [
                 {
-                    "block": block["block_id"],
-                    "rank": rank,
-                    "bitstring": row["bitstring"],
-                    "count": row["count"],
-                    "probability": round(row["probability"], 6),
-                    "proxy_energy": round(row["proxy_energy"], 6),
-                    "feasible": row["feasible_after_repair"],
-                    "repaired": row["repaired"],
-                    "repair": row["repair_summary"],
-                    "true_distance": round(row["true_distance"], 6),
-                    "improvement": round(row["improvement"], 6),
-                    "accepted": bool(batch.get("accepted") and batch["accepted"]["bitstring"] == row["bitstring"]),
+                    "customer_id": customer.customer_id,
+                    "x": customer.x,
+                    "y": customer.y,
+                    "demand": customer.demand,
                 }
-            )
-        evidence.append(
+                for customer in route.customers
+            ],
+            "load": route.load,
+            "distance": route.distance,
+        }
+        for route in plans
+    ]
+
+
+def _instance_payload(instance: DispatchInstance) -> dict[str, Any]:
+    return {
+        "depot": list(instance.depot),
+        "num_vehicles": instance.num_vehicles,
+        "vehicle_capacity": instance.vehicle_capacity,
+        "total_demand": instance.total_demand,
+        "customers": [
             {
-                "block": block,
-                "source": trace["source"],
-                "status": trace["status"],
-                "task_id": run.get("task_id"),
-                "backend": run.get("backend"),
-                "shots": run.get("shots"),
-                "counts": run.get("counts"),
-                "qasm": run.get("qasm"),
-                "physical_qasm": run.get("physical_qasm"),
-                "compilation": run.get("compilation"),
-                "message": run.get("message"),
+                "customer_id": customer.customer_id,
+                "x": customer.x,
+                "y": customer.y,
+                "demand": customer.demand,
+            }
+            for customer in instance.customers
+        ],
+    }
+
+
+def _result_payload(result: DeepBlockResult, instance: DispatchInstance) -> dict[str, Any]:
+    raw = result.payload()
+    raw["routes"] = _routes_payload(result.assignments, instance)
+    raw["improvement_pct"] = (
+        100.0 * result.improvement / result.baseline_distance
+        if result.baseline_distance > 0
+        else 0.0
+    )
+    raw["task_ids"] = [
+        trace.run.task_id for trace in result.traces if trace.run.task_id
+    ]
+    raw["backend"] = next(
+        (trace.run.backend for trace in result.traces if trace.run.backend),
+        "",
+    )
+    raw["shots_received"] = sum(
+        sum(trace.run.counts.values()) for trace in result.traces
+    )
+    return raw
+
+
+def run_deepblock_optimization(
+    *,
+    instance: DispatchInstance,
+    mode: str = "deepblock_simulator",
+    backend: str = "Baihua",
+    shots: int = 4096,
+    candidate_k: int = 64,
+    qaoa_depth: int = 1,
+    pool_size: int = 16,
+    block_size: int = 8,
+    overlap: int = 3,
+    seed: int = 2026,
+    submit_hardware: bool = False,
+    confirm_hardware_submit: bool = False,
+    history_root: str | Path | None = None,
+    save_history: bool = True,
+) -> dict[str, Any]:
+    """Run one fair DeepBlock comparison and return the UI's stable schema."""
+    requested_mode = str(mode or "").strip().lower()
+    if requested_mode not in MODE_ORDER:
+        raise ValueError(f"unsupported mode: {mode}")
+    if not instance.feasible_capacity:
+        raise ValueError(
+            "Total demand exceeds fleet capacity; increase capacity before running."
+        )
+
+    initial_result = capacity_constrained_kmeans(instance, seed=int(seed))
+    initial_assignments = {
+        vehicle: list(customers)
+        for vehicle, customers in initial_result.assignments.items()
+    }
+    initial_routes = _routes_payload(initial_assignments, instance)
+    initial_distance = float(sum(route["distance"] for route in initial_routes))
+    config_base = dict(
+        pool_size=int(pool_size),
+        block_size=int(block_size),
+        overlap=int(overlap),
+        qaoa_depth=int(qaoa_depth),
+        shots=int(shots),
+        candidate_k=int(candidate_k),
+        scan_order="forward",
+        backend=str(backend or "Baihua"),
+    )
+
+    results: dict[str, DeepBlockResult] = {}
+    chip_info: dict[str, Any] | None = None
+    if submit_hardware:
+        try:
+            from quark.circuit import Backend
+        except ImportError as exc:
+            raise RuntimeError(
+                "quarkcircuit==0.5.13 is required for Baihua calibration and compilation."
+            ) from exc
+        chip_info = dict(Backend(str(backend or "Baihua")).chip_info)
+    # All arms receive the same immutable starting assignment and parameters.
+    for arm_mode in MODE_ORDER:
+        is_hardware = arm_mode == "deepblock_hardware"
+        should_submit = bool(submit_hardware and requested_mode == arm_mode)
+        config = DeepBlockConfig(
+            **config_base,
+            submit_hardware=should_submit,
+            confirm_hardware_submit=bool(confirm_hardware_submit and should_submit),
+        )
+        results[arm_mode] = run_deepblock(
+            instance=instance,
+            initial_assignments=initial_assignments,
+            mode=arm_mode,
+            config=config,
+            seed=int(seed),
+            chip_info=chip_info if is_hardware else None,
+        )
+
+    selected = _result_payload(results[requested_mode], instance)
+    comparisons: list[dict[str, Any]] = [
+        {
+            "method": "Initial",
+            "mode": "classical_initial",
+            "source": "classical",
+            "status": "COMPLETED",
+            "final_distance": initial_distance,
+            "improvement": 0.0,
+            "improvement_pct": 0.0,
+            "accepted_moves": 0,
+            "task_ids": [],
+        }
+    ]
+    labels = {
+        "deepblock_hardware": "Hardware",
+        "deepblock_random": "Random",
+        "deepblock_simulator": "Simulator",
+        "deepblock_exact": "Exact",
+    }
+    for arm_mode in MODE_ORDER:
+        item = _result_payload(results[arm_mode], instance)
+        comparisons.append(
+            {
+                "method": labels[arm_mode],
+                "mode": arm_mode,
+                "source": item["source"],
+                "status": item["status"],
+                "final_distance": item["final_distance"],
+                "improvement": item["improvement"],
+                "improvement_pct": item["improvement_pct"],
+                "accepted_moves": item["accepted_moves"],
+                "task_ids": item["task_ids"],
+                "backend": item["backend"],
+                "shots_received": item["shots_received"],
             }
         )
-    block_columns = [{"name": key.replace("_", " ").title(), "id": key} for key in (block_rows[0].keys() if block_rows else [])]
-    candidate_columns = [{"name": key.replace("_", " ").title(), "id": key} for key in (candidate_rows[0].keys() if candidate_rows else [])]
-    badges = [
-        html.Span(f"source={selected.get('source')}", className="status-pill"),
-        html.Span(f"backend={selected.get('backend') or '—'}", className="status-pill"),
-        html.Span(f"tasks={len(selected.get('task_ids', []))}", className="status-pill"),
-        html.Span(f"shots received={selected.get('shots_received', 0)}", className="status-pill"),
-    ]
 
-    comparisons = payload.get("comparisons", [])
-    bar = go.Figure(
-        go.Bar(
-            x=[row["method"] for row in comparisons],
-            y=[
-                row["final_distance"]
-                if row["status"] == "COMPLETED"
-                else None
-                for row in comparisons
-            ],
-            text=[
-                f"{row['final_distance']:.2f}"
-                if row["status"] == "COMPLETED"
-                else "N/E"
-                for row in comparisons
-            ],
-            textposition="outside",
-            marker={"color": ["#8291a7", "#7c5cfc", "#f2a93b", "#2f80ed", "#22a06b"]},
-        )
+    run_id = (
+        datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        + "-"
+        + uuid4().hex[:8]
     )
-    bar.update_layout(
-        template="plotly_white",
-        title="最终真实路线距离（越低越好）",
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="#fbfdff",
-        height=410,
-        margin={"l": 45, "r": 20, "t": 55, "b": 35},
-        font={"color": INK},
-        yaxis={"gridcolor": "#e8eef6"},
-    )
-    scan = go.Figure()
-    for index, (arm_mode, arm) in enumerate(payload.get("arms", {}).items()):
-        ys = [arm["baseline_distance"]] + [trace["distance_after"] for trace in arm.get("traces", [])]
-        xs = ["Initial"] + [f"{trace['block']['block_id']}·{trace['sequence']}" for trace in arm.get("traces", [])]
-        scan.add_trace(
-            go.Scatter(
-                x=xs,
-                y=ys,
-                mode="lines+markers",
-                name=arm["source"].title(),
-                line={"color": COLORS[index % len(COLORS)], "width": 2.4},
-            )
-        )
-    scan.update_layout(
-        template="plotly_white",
-        title="DeepBlock 扫描距离变化",
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="#fbfdff",
-        height=410,
-        margin={"l": 45, "r": 20, "t": 55, "b": 35},
-        font={"color": INK},
-        yaxis={"gridcolor": "#e8eef6"},
-    )
-    comparison_rows = [
-        {
-            "method": row["method"],
-            "source": row["source"],
-            "status": row["status"],
-            "final_distance": round(row["final_distance"], 6),
-            "improvement": round(row["improvement"], 6),
-            "improvement_pct": round(row["improvement_pct"], 3),
-            "accepted_moves": row["accepted_moves"],
-            "task_ids": ", ".join(row.get("task_ids", [])) or "—",
-        }
-        for row in comparisons
-    ]
-    comparison_columns = [{"name": key.replace("_", " ").title(), "id": key} for key in comparison_rows[0]]
-    fairness = payload.get("fairness", {})
-    fairness_text = html.Div(
-        [
-            html.Strong("公平性锁定：", style={"color": "#2f80ed"}),
-            html.Span("  相同实例 / 初始分配 / B1-B3 / shots / Top-k / 修复 / 路线评价器 / 严格接受规则"),
-            html.Span("  ·  全部通过" if all(fairness.values()) else "  ·  请检查", style={"color": "#168f62"}),
-        ]
-    )
-    history_detail = html.Div(
-        [
-            html.H3(f"当前结果 · {payload.get('run_id')}"),
-            html.P(
-                f"{payload['created_at']} · seed={payload['parameters']['seed']} · "
-                f"{payload['parameters']['num_customers']} customers · {payload['parameters']['num_vehicles']} vehicles",
-                style={"color": MUTED},
-            ),
-            html.P(
-                f"source={selected.get('source')} · backend={selected.get('backend') or '—'} · "
-                f"task IDs={', '.join(selected.get('task_ids', [])) or '—'} · status={selected.get('status')}"
-            ),
-            html.P("Warnings: " + (" | ".join(payload.get("warnings", [])) or "none"), style={"color": "#a86800"}),
-        ]
-    )
-    return (
-        metrics,
-        initial_figure,
-        final_figure,
-        route_rows,
-        route_columns,
-        block_rows,
-        block_columns,
-        candidate_rows,
-        candidate_columns,
-        badges,
-        json.dumps(evidence, ensure_ascii=False, indent=2),
-        bar,
-        scan,
-        comparison_rows,
-        comparison_columns,
-        fairness_text,
-        history_detail,
-    )
-
-
-@app.callback(
-    Output("history-table", "data"),
-    Output("history-table", "columns"),
-    Output("history-run-id", "options"),
-    Input("refresh-history-btn", "n_clicks"),
-    Input("run-store", "data"),
-)
-def refresh_history(_clicks, _payload):
-    rows = HISTORY.rows()
-    columns = [{"name": key.replace("_", " ").title(), "id": key} for key in (rows[0].keys() if rows else [])]
-    options = [{"label": f"{row['time']} · {row['run_id']} · {row['mode']}", "value": row["run_id"]} for row in rows]
-    return rows, columns, options
-
-
-app.index_string = """
-<!DOCTYPE html>
-<html>
-  <head>
-    {%metas%}
-    <title>{%title%}</title>
-    {%favicon%}
-    {%css%}
-    <style>
-      :root { color-scheme: light; }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        font-size: 15px;
-        line-height: 1.45;
-        background:
-          radial-gradient(circle at 12% 4%, rgba(95,171,255,.20), transparent 31%),
-          radial-gradient(circle at 88% 0%, rgba(151,123,255,.14), transparent 28%),
-          linear-gradient(180deg, #f7faff 0%, #f3f6fb 100%);
-        font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
-      }
-      .logo-mark {
-        width: 54px; height: 54px; display: grid; place-items: center;
-        border-radius: 16px; color: #ffffff; font-weight: 900; letter-spacing: -1px;
-        background: linear-gradient(145deg,#3da7f5,#7c5cfc);
-        box-shadow: 0 10px 28px rgba(67,124,218,.22);
-      }
-      .eyebrow { font-size: 11px; letter-spacing: 2.4px; color: #2f80ed; font-weight: 800; }
-      .status-pill {
-        display: inline-flex; align-items: center; min-height: 28px; padding: 5px 10px;
-        border: 1px solid #cfe0f4; border-radius: 999px;
-        background: #edf5ff; color: #315b8f; font-size: 12px; font-weight: 700;
-      }
-      .status-banner {
-        margin: 13px 0; padding: 11px 15px; border-left: 3px solid #2f80ed;
-        border-radius: 8px; background: #edf6ff; color: #496783; font-size: 13px;
-        box-shadow: 0 6px 18px rgba(63,107,158,.07);
-      }
-      .run-button, .secondary-button {
-        border: 0; border-radius: 10px; padding: 11px 18px; cursor: pointer;
-        font-size: 14px; font-weight: 800; color: #ffffff; background: linear-gradient(90deg,#3da7f5,#7c5cfc);
-        box-shadow: 0 8px 18px rgba(79,126,211,.18);
-      }
-      .secondary-button { color: #365978; background: #ffffff; border: 1px solid #cedbea; box-shadow: none; }
-      input, .Select-control, .dash-dropdown .Select-control {
-        border-radius: 9px !important; border: 1px solid #cfdaea !important;
-        background: #ffffff !important; color: #183153 !important;
-        font-size: 14px !important;
-        box-shadow: 0 2px 5px rgba(69,92,125,.04);
-      }
-      input:focus { border-color: #68a9f5 !important; outline: none; box-shadow: 0 0 0 3px rgba(47,128,237,.10); }
-      .Select-menu-outer { background: #ffffff !important; border-color: #cfdaea !important; }
-      .Select-value-label, .Select-placeholder { color: #183153 !important; }
-      .Select-option { color: #294866 !important; background: #ffffff !important; }
-      .Select-option.is-focused { background: #edf5ff !important; }
-      .tab { background: rgba(255,255,255,.76) !important; color: #70849f !important; border: 0 !important; padding: 14px !important; font-size: 15px !important; }
-      .tab--selected { color: #2f80ed !important; border-top: 2px solid #2f80ed !important; background: #ffffff !important; font-weight: 700; }
-      .tab-content { padding-top: 15px; }
-      @media (max-width: 900px) {
-        #metric-row { grid-template-columns: 1fr 1fr !important; }
-      }
-    </style>
-  </head>
-  <body>
-    {%app_entry%}
-    <footer>{%config%}{%scripts%}{%renderer%}</footer>
-  </body>
-</html>
-"""
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Quantum Route Forge competition UI")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8050)
-    parser.add_argument("--debug", action="store_true")
-    args = parser.parse_args()
-    app.run(host=args.host, port=args.port, debug=args.debug)
+    arms_payload = {
+        arm_mode: _result_payload(result, instance)
+        for arm_mode, result in results.items()
+    }
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "run_id": run_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "parameters": {
+            "seed": int(seed),
+            "num_customers": len(instance.customers),
+            "num_vehicles": instance.num_vehicles,
+            "vehicle_capacity": instance.vehicle_capacity,
+            "mode": requested_mode,
+            "backend": str(backend or "Baihua"),
+            "shots": int(shots),
+            "candidate_k": int(candidate_k),
+            "qaoa_depth": int(qaoa_depth),
+            "pool_size": int(pool_size),
+            "block_size": int(block_size),
+            "overlap": int(overlap),
+        },
+        "fairness": {
+            "same_instance": True,
+            "same_initial_assignment": True,
+            "same_blocks": True,
+            "same_shots": True,
+            "same_candidate_k": True,
+            "same_capacity_repair": True,
+            "same_route_evaluator": True,
+            "same_acceptance_rule": "strict_true_distance_improvement",
+        },
+        "instance": _instance_payload(instance),
+        "initial": {
+            "distance": initial_distance,
+            "assignments": {
+                str(vehicle): [customer.customer_id for customer in customers]
+                for vehicle, customers in sorted(initial_assignments.items())
+            },
+            "routes": initial_routes,
+        },
+        "selected": selected,
+        "arms": arms_payload,
+        "quantum_effect": low_energy_effect_from_payload(
+            arms_payload["deepblock_hardware"]
+        ),
+        "comparisons": comparisons,
+        "warnings": (
+            [
+                "Hardware is a guarded dry-run and is NOT_EVALUABLE until explicit submission is confirmed."
+            ]
+            if not submit_hardware
+            else []
+        ),
+    }
+    if save_history:
+        root = Path(history_root) if history_root else Path("results") / "competition_history"
+        CompetitionHistory(root).save(payload)
+    return payload
