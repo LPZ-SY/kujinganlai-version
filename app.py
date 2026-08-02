@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any
 
 from dash import Dash, Input, Output, State, ctx, dash_table, dcc, html, no_update
+from dotenv import load_dotenv
 import plotly.graph_objects as go
 
 ROOT = Path(__file__).resolve().parent
 SRC = ROOT / "src"
+PROJECT_ENV_FILE = ROOT / ".env"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
@@ -29,6 +33,41 @@ PANEL = {
     "boxShadow": "0 14px 38px rgba(67,90,124,.10)",
 }
 HISTORY = CompetitionHistory(ROOT / "results" / "competition_history")
+CHINA_STANDARD_TIME = timezone(timedelta(hours=8))
+
+
+def _configure_quafu_token(env_file: Path = PROJECT_ENV_FILE) -> str:
+    """Load the project-local .env without logging or returning the credential."""
+    had_environment_token = bool(os.getenv("QUAFU_API_TOKEN", "").strip())
+    load_dotenv(dotenv_path=env_file, override=False)
+    if not os.getenv("QUAFU_API_TOKEN", "").strip():
+        return "missing"
+    return "environment" if had_environment_token else "project_env"
+
+
+QUAFU_TOKEN_SOURCE = _configure_quafu_token()
+
+
+def _history_option_label(row: dict[str, Any]) -> str:
+    """Build a compact, single-line label for the history selector."""
+    raw_time = str(row.get("time") or "")
+    try:
+        parsed = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        display_time = parsed.astimezone(CHINA_STANDARD_TIME).strftime("%m-%d %H:%M")
+    except ValueError:
+        display_time = raw_time[:16] or "-- --:--"
+    mode = {
+        "deepblock_hardware": "Hardware",
+        "deepblock_random": "Random",
+        "deepblock_simulator": "Simulator",
+        "deepblock_exact": "Exact",
+    }.get(str(row.get("mode") or ""), str(row.get("mode") or "Unknown"))
+    status = str(row.get("status") or "UNKNOWN").upper()
+    run_id = str(row.get("run_id") or "")
+    short_id = run_id.rsplit("-", 1)[-1] if run_id else "--------"
+    return f"{display_time} | {mode} | {status} | {short_id}"
 
 
 def _latest_history_payload():
@@ -206,8 +245,9 @@ controls = html.Div(
                     "运行模式",
                     dcc.Dropdown(
                         id="mode",
-                        value="deepblock_simulator",
+                        value="deepblock_hardware",
                         clearable=False,
+                        disabled=True,
                         options=[
                             {"label": "Baihua Hardware", "value": "deepblock_hardware"},
                             {"label": "Uniform Random", "value": "deepblock_random"},
@@ -237,9 +277,10 @@ controls = html.Div(
                 {
                     "label": " 我确认：Hardware 模式将真实提交最多 3 个 Baihua 任务",
                     "value": "confirm",
+                    "disabled": True,
                 }
             ],
-            value=[],
+            value=["confirm"],
             style={"fontSize": "13px", "color": "#a86800", "marginTop": "13px"},
         ),
         html.Div(
@@ -313,11 +354,16 @@ history_page = html.Div(
                 html.Div([html.Div("LOCAL HISTORY", className="eyebrow"), html.H2("运行历史与证据重载", style={"margin": "6px 0"})]),
                 html.Div(
                     [
-                        dcc.Dropdown(id="history-run-id", placeholder="选择 run ID", style={"minWidth": "310px"}),
+                        dcc.Dropdown(
+                            id="history-run-id",
+                            placeholder="选择运行记录",
+                            className="history-dropdown",
+                            style={"width": "520px", "maxWidth": "65vw"},
+                        ),
                         html.Button("重新打开", id="open-history-btn", n_clicks=0, className="secondary-button"),
                         html.Button("刷新", id="refresh-history-btn", n_clicks=0, className="secondary-button"),
                     ],
-                    style={"display": "flex", "gap": "10px", "alignItems": "center"},
+                    style={"display": "flex", "gap": "10px", "alignItems": "center", "flexWrap": "wrap"},
                 ),
             ],
             style={"display": "flex", "justifyContent": "space-between", "alignItems": "center"},
@@ -427,10 +473,12 @@ def execute_or_open(
             num_vehicles=int(num_vehicles),
             vehicle_capacity=int(vehicle_capacity),
         )
-        confirmed = "confirm" in (hardware_confirm or [])
+        quafu_token = os.getenv("QUAFU_API_TOKEN", "").strip()
+        if not quafu_token:
+            raise RuntimeError(f"QUAFU_API_TOKEN is missing from {PROJECT_ENV_FILE}")
         payload = run_deepblock_optimization(
             instance=instance,
-            mode=mode,
+            mode="deepblock_hardware",
             backend=backend,
             shots=int(shots),
             candidate_k=int(candidate_k),
@@ -439,8 +487,9 @@ def execute_or_open(
             block_size=8,
             overlap=3,
             seed=int(seed),
-            submit_hardware=(mode == "deepblock_hardware" and confirmed),
-            confirm_hardware_submit=(mode == "deepblock_hardware" and confirmed),
+            api_token=quafu_token,
+            submit_hardware=True,
+            confirm_hardware_submit=True,
             history_root=HISTORY.root,
         )
         selected = payload["selected"]
@@ -596,6 +645,20 @@ def render_run(payload):
         html.Span(f"tasks={len(selected.get('task_ids', []))}", className="status-pill"),
         html.Span(f"shots received={selected.get('shots_received', 0)}", className="status-pill"),
     ]
+    quantum_effect = payload.get("quantum_effect") or {}
+    if quantum_effect.get("evaluable"):
+        badges.extend(
+            [
+                html.Span(
+                    f"最低10%能量质量={100 * quantum_effect['mean_hardware_mass']:.2f}%",
+                    className="status-pill",
+                ),
+                html.Span(
+                    f"相对均匀随机={quantum_effect['enrichment']:.2f}×",
+                    className="status-pill",
+                ),
+            ]
+        )
 
     comparisons = payload.get("comparisons", [])
     bar = go.Figure(
@@ -684,6 +747,18 @@ def render_run(payload):
                 f"source={selected.get('source')} · backend={selected.get('backend') or '—'} · "
                 f"task IDs={', '.join(selected.get('task_ids', [])) or '—'} · status={selected.get('status')}"
             ),
+            (
+                html.P(
+                    f"最低10% QUBO 能量区域：Hardware "
+                    f"{100 * quantum_effect['mean_hardware_mass']:.2f}% vs Uniform "
+                    f"{100 * quantum_effect['mean_uniform_mass']:.2f}% · "
+                    f"{quantum_effect['enrichment']:.2f}× · "
+                    f"{quantum_effect['positive_blocks']}/{quantum_effect['total_blocks']} blocks 为正向",
+                    style={"color": "#168f62", "fontWeight": 700},
+                )
+                if quantum_effect.get("evaluable")
+                else None
+            ),
             html.P("Warnings: " + (" | ".join(payload.get("warnings", [])) or "none"), style={"color": "#a86800"}),
         ]
     )
@@ -718,7 +793,10 @@ def render_run(payload):
 def refresh_history(_clicks, _payload):
     rows = HISTORY.rows()
     columns = [{"name": key.replace("_", " ").title(), "id": key} for key in (rows[0].keys() if rows else [])]
-    options = [{"label": f"{row['time']} · {row['run_id']} · {row['mode']}", "value": row["run_id"]} for row in rows]
+    options = [
+        {"label": _history_option_label(row), "value": row["run_id"]}
+        for row in rows
+    ]
     return rows, columns, options
 
 
@@ -777,6 +855,21 @@ app.index_string = """
       .Select-value-label, .Select-placeholder { color: #183153 !important; }
       .Select-option { color: #294866 !important; background: #ffffff !important; }
       .Select-option.is-focused { background: #edf5ff !important; }
+      .history-dropdown .Select-control { min-height: 42px !important; height: 42px !important; }
+      .history-dropdown .Select-placeholder,
+      .history-dropdown .Select-value { line-height: 40px !important; }
+      .history-dropdown .Select-value-label {
+        display: block !important; overflow: hidden !important;
+        text-overflow: ellipsis !important; white-space: nowrap !important;
+      }
+      .history-dropdown .Select-menu-outer {
+        min-width: 520px !important; z-index: 1100 !important;
+      }
+      .history-dropdown .Select-option {
+        min-height: 40px !important; padding: 10px 12px !important;
+        line-height: 20px !important; overflow: hidden !important;
+        text-overflow: ellipsis !important; white-space: nowrap !important;
+      }
       .tab { background: rgba(255,255,255,.76) !important; color: #70849f !important; border: 0 !important; padding: 14px !important; font-size: 15px !important; }
       .tab--selected { color: #2f80ed !important; border-top: 2px solid #2f80ed !important; background: #ffffff !important; font-weight: 700; }
       .tab-content { padding-top: 15px; }
@@ -794,6 +887,14 @@ app.index_string = """
 
 
 if __name__ == "__main__":
+    if QUAFU_TOKEN_SOURCE == "missing":
+        print(
+            f"WARNING: QUAFU_API_TOKEN is unavailable in {PROJECT_ENV_FILE}. "
+            "Hardware submission will fail.",
+            flush=True,
+        )
+    else:
+        print(f"Quafu token configured from {QUAFU_TOKEN_SOURCE}.", flush=True)
     parser = argparse.ArgumentParser(description="Quantum Route Forge competition UI")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8050)
